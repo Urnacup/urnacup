@@ -1,7 +1,6 @@
-
 import React, { useEffect, useMemo, useState } from "react";
 
-const STORAGE_KEY = "urnacup-www-v1";
+const STORAGE_KEY = "urnacup-www-v2";
 const ADMIN_PASSWORD = "97531";
 const MATCH_DURATION_SECONDS = 12 * 60;
 const POINTS_WIN = 2;
@@ -90,8 +89,39 @@ function getTeamName(teams, id) {
   return teams.find((t) => t.id === id)?.name || "Neznámý tým";
 }
 
-function getSponsorName(sponsors, id) {
-  return sponsors.find((s) => s.id === id)?.name || "";
+function sponsorInitials(name) {
+  return String(name || "")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0])
+    .join("")
+    .toUpperCase();
+}
+
+function buildMatchesFromTemplates(teams) {
+  const teamIdByName = Object.fromEntries(teams.map((t) => [t.name, t.id]));
+  return fixedMatches
+    .filter((m) => teamIdByName[m.home] && teamIdByName[m.away])
+    .map((m, index) => ({
+      id: uid(),
+      round: index + 1,
+      time: m.time,
+      homeId: teamIdByName[m.home],
+      awayId: teamIdByName[m.away],
+      homeScore: "",
+      awayScore: "",
+      status: "scheduled",
+      sponsorId: "",
+      scorers: [],
+      live: {
+        running: false,
+        clock: MATCH_DURATION_SECONDS,
+        period: 1,
+        overlayTitle: "",
+        events: [],
+      },
+    }));
 }
 
 function buildInitialState() {
@@ -103,34 +133,12 @@ function buildInitialState() {
     manualRank: index + 1,
   }));
 
-  const teamIdByName = Object.fromEntries(teams.map((t) => [t.name, t.id]));
-
-  const matches = fixedMatches.map((m, index) => ({
-    id: uid(),
-    round: index + 1,
-    time: m.time,
-    homeId: teamIdByName[m.home],
-    awayId: teamIdByName[m.away],
-    homeScore: "",
-    awayScore: "",
-    status: "scheduled",
-    sponsorId: "",
-    scorers: [],
-    live: {
-      running: false,
-      clock: MATCH_DURATION_SECONDS,
-      period: 1,
-      overlayTitle: "",
-      events: [],
-    },
-  }));
-
   return {
     tournamentName: "Urna Cup",
     urnaLogoUrl: "",
     manualStandingsEnabled: false,
     teams,
-    matches,
+    matches: buildMatchesFromTemplates(teams),
     sponsors: defaultSponsors.map((s) => ({ id: uid(), ...s })),
   };
 }
@@ -141,12 +149,36 @@ function loadState() {
     if (!raw) return buildInitialState();
     const parsed = JSON.parse(raw);
     const fallback = buildInitialState();
+
+    const teams = Array.isArray(parsed.teams) ? parsed.teams : fallback.teams;
+    const matches =
+      Array.isArray(parsed.matches) && parsed.matches.length
+        ? parsed.matches.map((m) => ({
+            ...m,
+            scorers: Array.isArray(m.scorers) ? m.scorers : [],
+            live: {
+              running: Boolean(m.live?.running),
+              clock:
+                typeof m.live?.clock === "number"
+                  ? m.live.clock
+                  : MATCH_DURATION_SECONDS,
+              period:
+                typeof m.live?.period === "number" ? m.live.period : 1,
+              overlayTitle: m.live?.overlayTitle || "",
+              events: Array.isArray(m.live?.events) ? m.live.events : [],
+            },
+          }))
+        : buildMatchesFromTemplates(teams);
+
     return {
-      ...fallback,
-      ...parsed,
-      teams: Array.isArray(parsed.teams) ? parsed.teams : fallback.teams,
-      matches: Array.isArray(parsed.matches) ? parsed.matches : fallback.matches,
-      sponsors: Array.isArray(parsed.sponsors) ? parsed.sponsors : fallback.sponsors,
+      tournamentName: parsed.tournamentName || fallback.tournamentName,
+      urnaLogoUrl: parsed.urnaLogoUrl || "",
+      manualStandingsEnabled: Boolean(parsed.manualStandingsEnabled),
+      teams,
+      matches,
+      sponsors: Array.isArray(parsed.sponsors)
+        ? parsed.sponsors
+        : fallback.sponsors,
     };
   } catch {
     return buildInitialState();
@@ -154,7 +186,11 @@ function loadState() {
 }
 
 function isFinished(match) {
-  return match.status === "finished" && match.homeScore !== "" && match.awayScore !== "";
+  return (
+    match.status === "finished" &&
+    match.homeScore !== "" &&
+    match.awayScore !== ""
+  );
 }
 
 function buildStandings(teams, matches, manualEnabled) {
@@ -210,15 +246,29 @@ function buildStandings(teams, matches, manualEnabled) {
     r.gd = r.gf - r.ga;
   });
 
+  function group(items, keyFn) {
+    const map = new Map();
+    items.forEach((item) => {
+      const key = keyFn(item);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(item);
+    });
+    return Array.from(map.entries()).map(([key, items]) => ({ key, items }));
+  }
+
   function mini(ids) {
     const set = new Set(ids);
     const result = Object.fromEntries(ids.map((id) => [id, { pts: 0, gd: 0 }]));
+
     finished.forEach((m) => {
       if (!set.has(m.homeId) || !set.has(m.awayId)) return;
+
       const hs = Number(m.homeScore);
       const as = Number(m.awayScore);
+
       result[m.homeId].gd += hs - as;
       result[m.awayId].gd += as - hs;
+
       if (hs > as) {
         result[m.homeId].pts += POINTS_WIN;
       } else if (hs < as) {
@@ -228,17 +278,8 @@ function buildStandings(teams, matches, manualEnabled) {
         result[m.awayId].pts += POINTS_DRAW;
       }
     });
-    return result;
-  }
 
-  function group(items, keyFn) {
-    const map = new Map();
-    items.forEach((item) => {
-      const key = keyFn(item);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(item);
-    });
-    return Array.from(map.entries()).map(([key, items]) => ({ key, items }));
+    return result;
   }
 
   function sortRecursive(items, level = 0) {
@@ -257,6 +298,7 @@ function buildStandings(teams, matches, manualEnabled) {
         miniPts: m[x.teamId]?.pts || 0,
         miniGd: m[x.teamId]?.gd || 0,
       }));
+
       return group(enriched, (x) => x.miniPts)
         .sort((a, b) => Number(b.key) - Number(a.key))
         .flatMap((g) => sortRecursive(g.items, 2));
@@ -275,7 +317,10 @@ function buildStandings(teams, matches, manualEnabled) {
     });
   }
 
-  const computed = sortRecursive(rows).map((row, index) => ({ ...row, rank: index + 1 }));
+  const computed = sortRecursive(rows).map((row, index) => ({
+    ...row,
+    rank: index + 1,
+  }));
 
   if (!manualEnabled) return computed;
 
@@ -289,6 +334,7 @@ function buildStandings(teams, matches, manualEnabled) {
 
 function buildScorerTable(matches, teams) {
   const map = new Map();
+
   matches.forEach((match) => {
     (match.scorers || []).forEach((entry) => {
       const key = `${entry.teamId}::${entry.playerName}`;
@@ -307,20 +353,12 @@ function buildScorerTable(matches, teams) {
   return Array.from(map.values())
     .sort((a, b) => {
       if (b.goals !== a.goals) return b.goals - a.goals;
-      if (a.playerName !== b.playerName) return a.playerName.localeCompare(b.playerName, "cs");
+      if (a.playerName !== b.playerName) {
+        return a.playerName.localeCompare(b.playerName, "cs");
+      }
       return a.teamName.localeCompare(b.teamName, "cs");
     })
     .map((row, index) => ({ ...row, rank: index + 1 }));
-}
-
-function sponsorInitials(name) {
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0])
-    .join("")
-    .toUpperCase();
 }
 
 function App() {
@@ -353,6 +391,7 @@ function App() {
         }),
       }));
     }, 1000);
+
     return () => clearInterval(timer);
   }, []);
 
@@ -369,7 +408,11 @@ function App() {
     [data.teams, data.matches, data.manualStandingsEnabled]
   );
 
-  const scorers = useMemo(() => buildScorerTable(data.matches, data.teams), [data.matches, data.teams]);
+  const scorers = useMemo(
+    () => buildScorerTable(data.matches, data.teams),
+    [data.matches, data.teams]
+  );
+
   const selectedTeam = data.teams.find((t) => t.id === selectedTeamId) || null;
   const selectedMatch = data.matches.find((m) => m.id === selectedMatchId) || null;
   const currentSponsor = data.sponsors[sponsorIndex] || null;
@@ -394,7 +437,13 @@ function App() {
   function updateMatch(matchId, patch) {
     setData((current) => ({
       ...current,
-      matches: current.matches.map((m) => (m.id === matchId ? { ...m, ...patch } : m)),
+      matches: current.matches.map((m) => {
+        if (m.id !== matchId) return m;
+        return {
+          ...m,
+          ...patch,
+        };
+      }),
     }));
   }
 
@@ -412,6 +461,7 @@ function App() {
       ...current,
       matches: current.matches.map((match) => {
         if (match.id !== matchId) return match;
+
         const teamId = side === "home" ? match.homeId : match.awayId;
         const teamName = getTeamName(current.teams, teamId);
         const name = playerName || "Neurčený střelec";
@@ -423,11 +473,18 @@ function App() {
           status: match.status === "scheduled" ? "live" : match.status,
           homeScore: side === "home" ? homeScore + 1 : homeScore,
           awayScore: side === "away" ? awayScore + 1 : awayScore,
-          scorers: [...(match.scorers || []), { id: uid(), teamId, playerName: name }],
+          scorers: [
+            ...(match.scorers || []),
+            { id: uid(), teamId, playerName: name },
+          ],
           live: {
             ...match.live,
             events: [
-              { id: uid(), time: formatClock(match.live.clock), text: `Gól – ${teamName}: ${name}` },
+              {
+                id: uid(),
+                time: formatClock(match.live.clock),
+                text: `Gól – ${teamName}: ${name}`,
+              },
               ...(match.live.events || []),
             ].slice(0, 12),
           },
@@ -436,16 +493,87 @@ function App() {
     }));
   }
 
+  function removeScorerEntry(matchId, scorerId) {
+    setData((current) => ({
+      ...current,
+      matches: current.matches.map((match) => {
+        if (match.id !== matchId) return match;
+
+        const target = (match.scorers || []).find((entry) => entry.id === scorerId);
+        if (!target) return match;
+
+        const nextScorers = (match.scorers || []).filter((entry) => entry.id !== scorerId);
+        const nextHomeScore = Math.max(
+          0,
+          Number(match.homeScore || 0) - (target.teamId === match.homeId ? 1 : 0)
+        );
+        const nextAwayScore = Math.max(
+          0,
+          Number(match.awayScore || 0) - (target.teamId === match.awayId ? 1 : 0)
+        );
+
+        const teamName = getTeamName(current.teams, target.teamId);
+        const targetText = `Gól – ${teamName}: ${target.playerName}`;
+        let removed = false;
+
+        const nextEvents = (match.live.events || []).filter((event) => {
+          if (!removed && event.text === targetText) {
+            removed = true;
+            return false;
+          }
+          return true;
+        });
+
+        return {
+          ...match,
+          homeScore: nextHomeScore,
+          awayScore: nextAwayScore,
+          scorers: nextScorers,
+          live: {
+            ...match.live,
+            events: nextEvents,
+          },
+        };
+      }),
+    }));
+  }
+
+  function closeMatch(matchId) {
+    setData((current) => ({
+      ...current,
+      matches: current.matches.map((match) =>
+        match.id === matchId
+          ? {
+              ...match,
+              status: "finished",
+              live: {
+                ...match.live,
+                running: false,
+              },
+            }
+          : match
+      ),
+    }));
+  }
+
   function addTeam() {
     const name = newTeamName.trim();
     if (!name) return;
+
     setData((current) => ({
       ...current,
       teams: [
         ...current.teams,
-        { id: uid(), name, rosterText: "", shootoutScore: 0, manualRank: current.teams.length + 1 },
+        {
+          id: uid(),
+          name,
+          rosterText: "",
+          shootoutScore: 0,
+          manualRank: current.teams.length + 1,
+        },
       ],
     }));
+
     setNewTeamName("");
   }
 
@@ -453,17 +581,24 @@ function App() {
     setData((current) => ({
       ...current,
       teams: current.teams.filter((t) => t.id !== teamId),
-      matches: current.matches.filter((m) => m.homeId !== teamId && m.awayId !== teamId),
+      matches: current.matches.filter(
+        (m) => m.homeId !== teamId && m.awayId !== teamId
+      ),
     }));
   }
 
   function addSponsor() {
     const name = newSponsorName.trim();
     if (!name) return;
+
     setData((current) => ({
       ...current,
-      sponsors: [...current.sponsors, { id: uid(), name, logoUrl: newSponsorLogo.trim() }],
+      sponsors: [
+        ...current.sponsors,
+        { id: uid(), name, logoUrl: newSponsorLogo.trim() },
+      ],
     }));
+
     setNewSponsorName("");
     setNewSponsorLogo("");
   }
@@ -472,6 +607,14 @@ function App() {
     setData(buildInitialState());
     setSelectedMatchId("");
     setSelectedTeamId("");
+  }
+
+  function restoreFixedSchedule() {
+    setData((current) => ({
+      ...current,
+      matches: buildMatchesFromTemplates(current.teams),
+    }));
+    setSelectedMatchId("");
   }
 
   return (
@@ -487,16 +630,21 @@ function App() {
                   <div className="logo-fallback">URNA CUP</div>
                 )}
               </div>
+
               <div>
                 <div className="eyebrow">WWW prototyp turnaje</div>
                 <input
                   className="title-input"
                   value={data.tournamentName}
-                  onChange={(e) => isAdmin && setData((c) => ({ ...c, tournamentName: e.target.value }))}
+                  onChange={(e) =>
+                    isAdmin &&
+                    setData((c) => ({ ...c, tournamentName: e.target.value }))
+                  }
                   readOnly={!isAdmin}
                 />
                 <div className="muted">
-                  Body: 2 za výhru, 1 za remízu. U zápasu lze označit střelce podle soupisky a vede se tabulka střelců.
+                  Body: 2 za výhru, 1 za remízu. U zápasu lze označit střelce
+                  podle soupisky, mazat chybného střelce a vede se tabulka střelců.
                 </div>
               </div>
             </div>
@@ -504,13 +652,20 @@ function App() {
             <div className="stats">
               <Stat label="Týmy" value={String(data.teams.length)} />
               <Stat label="Zápasy" value={String(data.matches.length)} />
-              <Stat label="Ukončeno" value={String(data.matches.filter((m) => m.status === "finished").length)} />
+              <Stat
+                label="Ukončeno"
+                value={String(data.matches.filter((m) => m.status === "finished").length)}
+              />
+
               <div className="card">
                 {isAdmin ? (
                   <>
                     <div className="small-label success">Administrátor</div>
                     <div className="card-title">Editace je odemčená</div>
-                    <button className="button secondary" onClick={() => setIsAdmin(false)}>
+                    <button
+                      className="button secondary"
+                      onClick={() => setIsAdmin(false)}
+                    >
                       Odhlásit
                     </button>
                   </>
@@ -530,7 +685,6 @@ function App() {
                         Vstup
                       </button>
                     </div>
-                   
                     {authError ? <div className="error">{authError}</div> : null}
                   </>
                 )}
@@ -558,11 +712,15 @@ function App() {
                 <input
                   className="input"
                   value={data.urnaLogoUrl}
-                  onChange={(e) => setData((c) => ({ ...c, urnaLogoUrl: e.target.value }))}
+                  onChange={(e) =>
+                    setData((c) => ({ ...c, urnaLogoUrl: e.target.value }))
+                  }
                   placeholder="https://..."
                 />
               </div>
-              <div className="note">V této verzi se obrázky vkládají přes přímou URL adresu.</div>
+              <div className="note">
+                V této verzi se obrázky vkládají přes přímou URL adresu.
+              </div>
             </div>
           </section>
         ) : null}
@@ -589,6 +747,7 @@ function App() {
               {data.teams.map((team, index) => (
                 <div className="list-card" key={team.id}>
                   <div className="badge">{index + 1}</div>
+
                   <div className="list-main">
                     {isAdmin ? (
                       <input
@@ -597,14 +756,22 @@ function App() {
                         onChange={(e) => updateTeam(team.id, { name: e.target.value })}
                       />
                     ) : (
-                      <button className="link-button" onClick={() => setSelectedTeamId(team.id)}>
+                      <button
+                        className="link-button"
+                        onClick={() => setSelectedTeamId(team.id)}
+                      >
                         {team.name}
                       </button>
                     )}
+
                     <div className="row between">
-                      <button className="link-button tiny-link" onClick={() => setSelectedTeamId(team.id)}>
+                      <button
+                        className="link-button tiny-link"
+                        onClick={() => setSelectedTeamId(team.id)}
+                      >
                         Zobrazit profil týmu
                       </button>
+
                       {isAdmin ? (
                         <div className="row mini-row">
                           <span className="tiny">Nájezdy</span>
@@ -612,14 +779,22 @@ function App() {
                             className="mini-input"
                             type="number"
                             value={team.shootoutScore}
-                            onChange={(e) => updateTeam(team.id, { shootoutScore: Number(e.target.value || 0) })}
+                            onChange={(e) =>
+                              updateTeam(team.id, {
+                                shootoutScore: Number(e.target.value || 0),
+                              })
+                            }
                           />
                         </div>
                       ) : null}
                     </div>
                   </div>
+
                   {isAdmin ? (
-                    <button className="icon-button danger" onClick={() => removeTeam(team.id)}>
+                    <button
+                      className="icon-button danger"
+                      onClick={() => removeTeam(team.id)}
+                    >
                       Smazat
                     </button>
                   ) : null}
@@ -629,7 +804,7 @@ function App() {
 
             {isAdmin ? (
               <div className="grid-two top-gap">
-                <button className="button secondary" onClick={() => setData((c) => ({ ...c, matches: buildMatchesFromTemplates(c.teams) }))}>
+                <button className="button secondary" onClick={restoreFixedSchedule}>
                   Obnovit pevný rozpis
                 </button>
                 <button className="button secondary" onClick={resetData}>
@@ -641,16 +816,32 @@ function App() {
 
           <section className="panel">
             <h2>Rozpis zápasů</h2>
+
             <div className="stack top-gap">
               {data.matches.map((match) => {
-                const sponsorName = getSponsorName(data.sponsors, match.sponsorId);
+                const sponsorName =
+                  data.sponsors.find((s) => s.id === match.sponsorId)?.name || "";
+
                 return (
-                  <button key={match.id} className="match-card" onClick={() => setSelectedMatchId(match.id)}>
+                  <button
+                    key={match.id}
+                    className="match-card"
+                    onClick={() => setSelectedMatchId(match.id)}
+                  >
                     <div className="match-meta">
                       <span>{match.time}</span>
-                      <span className={`status ${match.status}`}>{match.status === "scheduled" ? "Plánováno" : match.status === "live" ? "Živě" : "Ukončeno"}</span>
-                      {sponsorName ? <span className="sponsor-chip">Partner: {sponsorName}</span> : null}
+                      <span className={`status ${match.status}`}>
+                        {match.status === "scheduled"
+                          ? "Plánováno"
+                          : match.status === "live"
+                          ? "Živě"
+                          : "Ukončeno"}
+                      </span>
+                      {sponsorName ? (
+                        <span className="sponsor-chip">Partner: {sponsorName}</span>
+                      ) : null}
                     </div>
+
                     <div className="match-line">
                       <span>{getTeamName(data.teams, match.homeId)}</span>
                       <strong>{match.homeScore === "" ? "–" : match.homeScore}</strong>
@@ -666,7 +857,10 @@ function App() {
           <section className="right-stack">
             <section className="panel">
               <h2>Aktuální tabulka</h2>
-              <div className="note top-gap">Bodování: 2 za výhru, 1 za remízu.</div>
+
+              <div className="note top-gap">
+                Bodování: 2 za výhru, 1 za remízu.
+              </div>
 
               {isAdmin ? (
                 <div className="manual-box top-gap">
@@ -674,7 +868,12 @@ function App() {
                     <input
                       type="checkbox"
                       checked={data.manualStandingsEnabled}
-                      onChange={(e) => setData((c) => ({ ...c, manualStandingsEnabled: e.target.checked }))}
+                      onChange={(e) =>
+                        setData((c) => ({
+                          ...c,
+                          manualStandingsEnabled: e.target.checked,
+                        }))
+                      }
                     />
                     Zapnout ruční pořadí tabulky
                   </label>
@@ -691,7 +890,11 @@ function App() {
                             type="number"
                             min="1"
                             value={team.manualRank}
-                            onChange={(e) => updateTeam(team.id, { manualRank: Number(e.target.value || 1) })}
+                            onChange={(e) =>
+                              updateTeam(team.id, {
+                                manualRank: Number(e.target.value || 1),
+                              })
+                            }
                           />
                         </div>
                       ))}
@@ -719,7 +922,10 @@ function App() {
                       <tr key={row.teamId}>
                         <td>{row.rank}</td>
                         <td>
-                          <button className="link-button" onClick={() => setSelectedTeamId(row.teamId)}>
+                          <button
+                            className="link-button"
+                            onClick={() => setSelectedTeamId(row.teamId)}
+                          >
                             {row.teamName}
                           </button>
                         </td>
@@ -727,8 +933,12 @@ function App() {
                         <td>{row.wins}</td>
                         <td>{row.draws}</td>
                         <td>{row.losses}</td>
-                        <td>{row.gf}:{row.ga}</td>
-                        <td><strong>{row.points}</strong></td>
+                        <td>
+                          {row.gf}:{row.ga}
+                        </td>
+                        <td>
+                          <strong>{row.points}</strong>
+                        </td>
                         <td>{row.shootoutScore}</td>
                       </tr>
                     ))}
@@ -739,6 +949,7 @@ function App() {
 
             <section className="panel">
               <h2>Tabulka střelců</h2>
+
               {scorers.length === 0 ? (
                 <div className="empty top-gap">Zatím není zapsaný žádný střelec.</div>
               ) : (
@@ -758,7 +969,9 @@ function App() {
                           <td>{row.rank}</td>
                           <td>{row.playerName}</td>
                           <td>{row.teamName}</td>
-                          <td><strong>{row.goals}</strong></td>
+                          <td>
+                            <strong>{row.goals}</strong>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -769,11 +982,24 @@ function App() {
 
             <section className="panel">
               <h2>Sponzoři</h2>
+
               {isAdmin ? (
                 <div className="stack top-gap">
-                  <input className="input" value={newSponsorName} onChange={(e) => setNewSponsorName(e.target.value)} placeholder="Název sponzora" />
-                  <input className="input" value={newSponsorLogo} onChange={(e) => setNewSponsorLogo(e.target.value)} placeholder="Odkaz na logo (URL)" />
-                  <button className="button" onClick={addSponsor}>Přidat sponzora</button>
+                  <input
+                    className="input"
+                    value={newSponsorName}
+                    onChange={(e) => setNewSponsorName(e.target.value)}
+                    placeholder="Název sponzora"
+                  />
+                  <input
+                    className="input"
+                    value={newSponsorLogo}
+                    onChange={(e) => setNewSponsorLogo(e.target.value)}
+                    placeholder="Odkaz na logo (URL)"
+                  />
+                  <button className="button" onClick={addSponsor}>
+                    Přidat sponzora
+                  </button>
                 </div>
               ) : null}
 
@@ -781,18 +1007,27 @@ function App() {
                 {data.sponsors.map((sponsor) => (
                   <div className="sponsor-card" key={sponsor.id}>
                     <SponsorLogo sponsor={sponsor} />
+
                     <div className="sponsor-main">
                       {isAdmin ? (
                         <>
                           <input
                             className="inline-input"
                             value={sponsor.name}
-                            onChange={(e) => updateSponsor(setData, sponsor.id, { name: e.target.value })}
+                            onChange={(e) =>
+                              updateSponsor(setData, sponsor.id, {
+                                name: e.target.value,
+                              })
+                            }
                           />
                           <input
                             className="input"
                             value={sponsor.logoUrl}
-                            onChange={(e) => updateSponsor(setData, sponsor.id, { logoUrl: e.target.value })}
+                            onChange={(e) =>
+                              updateSponsor(setData, sponsor.id, {
+                                logoUrl: e.target.value,
+                              })
+                            }
                             placeholder="Odkaz na logo (URL)"
                           />
                         </>
@@ -800,8 +1035,12 @@ function App() {
                         <div className="card-title">{sponsor.name}</div>
                       )}
                     </div>
+
                     {isAdmin ? (
-                      <button className="icon-button danger" onClick={() => removeSponsorDirect(setData, sponsor.id)}>
+                      <button
+                        className="icon-button danger"
+                        onClick={() => removeSponsorDirect(setData, sponsor.id)}
+                      >
                         Smazat
                       </button>
                     ) : null}
@@ -835,7 +1074,8 @@ function App() {
           onMatchChange={updateMatch}
           onLiveChange={updateMatchLive}
           onAddGoal={addGoal}
-          onCloseMatch={(id) => updateMatch(id, { status: "finished", live: { ...selectedMatch.live, running: false } })}
+          onRemoveScorerEntry={removeScorerEntry}
+          onCloseMatch={closeMatch}
         />
       ) : null}
     </div>
@@ -845,7 +1085,9 @@ function App() {
 function updateSponsor(setData, sponsorId, patch) {
   setData((current) => ({
     ...current,
-    sponsors: current.sponsors.map((s) => (s.id === sponsorId ? { ...s, ...patch } : s)),
+    sponsors: current.sponsors.map((s) =>
+      s.id === sponsorId ? { ...s, ...patch } : s
+    ),
   }));
 }
 
@@ -853,7 +1095,9 @@ function removeSponsorDirect(setData, sponsorId) {
   setData((current) => ({
     ...current,
     sponsors: current.sponsors.filter((s) => s.id !== sponsorId),
-    matches: current.matches.map((m) => (m.sponsorId === sponsorId ? { ...m, sponsorId: "" } : m)),
+    matches: current.matches.map((m) =>
+      m.sponsorId === sponsorId ? { ...m, sponsorId: "" } : m
+    ),
   }));
 }
 
@@ -873,10 +1117,22 @@ function SponsorLogo({ sponsor }) {
   return <div className="sponsor-logo fallback">{sponsorInitials(sponsor.name)}</div>;
 }
 
-function TeamModal({ team, standings, matches, teams, isAdmin, onClose, onUpdateTeam }) {
+function TeamModal({
+  team,
+  standings,
+  matches,
+  teams,
+  isAdmin,
+  onClose,
+  onUpdateTeam,
+}) {
   const row = standings.find((x) => x.teamId === team.id);
-  const played = matches.filter((m) => isFinished(m) && (m.homeId === team.id || m.awayId === team.id));
-  const upcoming = matches.filter((m) => !isFinished(m) && (m.homeId === team.id || m.awayId === team.id));
+  const played = matches.filter(
+    (m) => isFinished(m) && (m.homeId === team.id || m.awayId === team.id)
+  );
+  const upcoming = matches.filter(
+    (m) => !isFinished(m) && (m.homeId === team.id || m.awayId === team.id)
+  );
   const roster = parseRoster(team.rosterText);
 
   return (
@@ -887,7 +1143,9 @@ function TeamModal({ team, standings, matches, teams, isAdmin, onClose, onUpdate
             <div className="small-label">Profil týmu</div>
             <div className="card-title big">{team.name}</div>
           </div>
-          <button className="button secondary" onClick={onClose}>Zavřít</button>
+          <button className="button secondary" onClick={onClose}>
+            Zavřít
+          </button>
         </div>
 
         <div className="modal-grid">
@@ -915,7 +1173,9 @@ function TeamModal({ team, standings, matches, teams, isAdmin, onClose, onUpdate
               ) : (
                 <div className="stack top-gap">
                   {roster.map((player, i) => (
-                    <div className="mini-card" key={player + i}>{i + 1}. {player}</div>
+                    <div className="mini-card" key={player + i}>
+                      {i + 1}. {player}
+                    </div>
                   ))}
                 </div>
               )}
@@ -926,14 +1186,32 @@ function TeamModal({ team, standings, matches, teams, isAdmin, onClose, onUpdate
             <div className="panel small-panel">
               <h3>Odehraná utkání</h3>
               <div className="stack top-gap">
-                {played.length === 0 ? <div className="empty">Tým ještě nemá odehrané utkání.</div> : played.map((m) => <MatchLine key={m.id} match={m} teamId={team.id} teams={teams} />)}
+                {played.length === 0 ? (
+                  <div className="empty">Tým ještě nemá odehrané utkání.</div>
+                ) : (
+                  played.map((m) => (
+                    <MatchLine key={m.id} match={m} teamId={team.id} teams={teams} />
+                  ))
+                )}
               </div>
             </div>
 
             <div className="panel small-panel">
               <h3>Příští program</h3>
               <div className="stack top-gap">
-                {upcoming.length === 0 ? <div className="empty">Další utkání zatím nejsou.</div> : upcoming.map((m) => <MatchLine key={m.id} match={m} teamId={team.id} teams={teams} future />)}
+                {upcoming.length === 0 ? (
+                  <div className="empty">Další utkání zatím nejsou.</div>
+                ) : (
+                  upcoming.map((m) => (
+                    <MatchLine
+                      key={m.id}
+                      match={m}
+                      teamId={team.id}
+                      teams={teams}
+                      future
+                    />
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -943,7 +1221,18 @@ function TeamModal({ team, standings, matches, teams, isAdmin, onClose, onUpdate
   );
 }
 
-function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, onLiveChange, onAddGoal, onCloseMatch }) {
+function MatchModal({
+  match,
+  teams,
+  sponsors,
+  isAdmin,
+  onClose,
+  onMatchChange,
+  onLiveChange,
+  onAddGoal,
+  onRemoveScorerEntry,
+  onCloseMatch,
+}) {
   const [homePlayer, setHomePlayer] = useState("");
   const [awayPlayer, setAwayPlayer] = useState("");
 
@@ -958,19 +1247,17 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
   const awayRoster = parseRoster(awayTeam?.rosterText || "");
   const sponsor = sponsors.find((s) => s.id === match.sponsorId) || null;
 
-  const summaryMap = new Map();
-  (match.scorers || []).forEach((entry) => {
-    const key = `${entry.teamId}::${entry.playerName}`;
-    if (!summaryMap.has(key)) {
-      summaryMap.set(key, {
-        teamName: getTeamName(teams, entry.teamId),
-        playerName: entry.playerName,
-        goals: 0,
-      });
-    }
-    summaryMap.get(key).goals += 1;
-  });
-  const scorerSummary = Array.from(summaryMap.values()).sort((a, b) => b.goals - a.goals || a.playerName.localeCompare(b.playerName, "cs"));
+  const scorerEntries = [...(match.scorers || [])]
+    .slice()
+    .reverse()
+    .map((entry) => ({
+      ...entry,
+      teamName: getTeamName(teams, entry.teamId),
+    }));
+
+  const latestScorer = match.scorers && match.scorers.length
+    ? match.scorers[match.scorers.length - 1]
+    : null;
 
   return (
     <div className="modal-overlay">
@@ -978,10 +1265,14 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
         <div className="modal-header">
           <div>
             <div className="small-label">Detail utkání</div>
-            <div className="card-title big">{homeTeam?.name} vs. {awayTeam?.name}</div>
+            <div className="card-title big">
+              {homeTeam?.name} vs. {awayTeam?.name}
+            </div>
             <div className="tiny">{match.time}</div>
           </div>
-          <button className="button secondary" onClick={onClose}>Zavřít</button>
+          <button className="button secondary" onClick={onClose}>
+            Zavřít
+          </button>
         </div>
 
         {sponsor ? (
@@ -997,19 +1288,28 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
         <div className="modal-grid">
           <div className="stack">
             <div className="scoreboard">
-              {match.live.overlayTitle ? <div className="overlay-title">{match.live.overlayTitle}</div> : null}
+              {match.live.overlayTitle ? (
+                <div className="overlay-title">{match.live.overlayTitle}</div>
+              ) : null}
+
               <div className="score-line">
                 <div className="score-side">
                   <div className="team-big">{homeTeam?.name}</div>
-                  <div className="score-number">{match.homeScore === "" ? 0 : match.homeScore}</div>
+                  <div className="score-number">
+                    {match.homeScore === "" ? 0 : match.homeScore}
+                  </div>
                 </div>
+
                 <div className="center-box">
                   <div className="clock">{formatClock(match.live.clock)}</div>
                   <div className="tiny">Perioda {match.live.period}</div>
                 </div>
+
                 <div className="score-side">
                   <div className="team-big">{awayTeam?.name}</div>
-                  <div className="score-number">{match.awayScore === "" ? 0 : match.awayScore}</div>
+                  <div className="score-number">
+                    {match.awayScore === "" ? 0 : match.awayScore}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1019,22 +1319,47 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
                 <h3>Administrace utkání a střelců</h3>
 
                 <div className="button-grid top-gap">
-                  <button className="button" onClick={() => onAddGoal(match.id, "home", "Neurčený střelec")}>+ domácí bez střelce</button>
-                  <button className="button" onClick={() => onAddGoal(match.id, "away", "Neurčený střelec")}>+ hosté bez střelce</button>
+                  <button
+                    className="button"
+                    onClick={() => onAddGoal(match.id, "home", "Neurčený střelec")}
+                  >
+                    + domácí bez střelce
+                  </button>
+
+                  <button
+                    className="button"
+                    onClick={() => onAddGoal(match.id, "away", "Neurčený střelec")}
+                  >
+                    + hosté bez střelce
+                  </button>
+
                   <button
                     className="button success"
                     onClick={() => {
                       if (match.live.running) {
                         onLiveChange(match.id, { running: false });
                       } else {
-                        onMatchChange(match.id, { status: match.status === "scheduled" ? "live" : match.status });
+                        onMatchChange(match.id, {
+                          status: match.status === "scheduled" ? "live" : match.status,
+                        });
                         onLiveChange(match.id, { running: true });
                       }
                     }}
                   >
                     {match.live.running ? "Pozastavit čas" : "Spustit čas"}
                   </button>
-                  <button className="button secondary" onClick={() => onLiveChange(match.id, { clock: MATCH_DURATION_SECONDS, running: false })}>Reset času</button>
+
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      onLiveChange(match.id, {
+                        clock: MATCH_DURATION_SECONDS,
+                        running: false,
+                      })
+                    }
+                  >
+                    Reset času
+                  </button>
                 </div>
 
                 <div className="grid-two top-gap">
@@ -1049,6 +1374,7 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
                       setHomePlayer("");
                     }}
                   />
+
                   <RosterScorerPicker
                     title={`Střelci ${awayTeam?.name || ""}`}
                     players={awayRoster}
@@ -1064,34 +1390,94 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
 
                 <div className="grid-two top-gap">
                   <Field label="Manuální skóre domácí">
-                    <input className="input" type="number" value={match.homeScore} onChange={(e) => onMatchChange(match.id, { homeScore: e.target.value })} />
+                    <input
+                      className="input"
+                      type="number"
+                      value={match.homeScore}
+                      onChange={(e) =>
+                        onMatchChange(match.id, { homeScore: e.target.value })
+                      }
+                    />
                   </Field>
+
                   <Field label="Manuální skóre hosté">
-                    <input className="input" type="number" value={match.awayScore} onChange={(e) => onMatchChange(match.id, { awayScore: e.target.value })} />
+                    <input
+                      className="input"
+                      type="number"
+                      value={match.awayScore}
+                      onChange={(e) =>
+                        onMatchChange(match.id, { awayScore: e.target.value })
+                      }
+                    />
                   </Field>
+
                   <Field label="Perioda">
-                    <select className="input" value={match.live.period} onChange={(e) => onLiveChange(match.id, { period: Number(e.target.value) })}>
+                    <select
+                      className="input"
+                      value={match.live.period}
+                      onChange={(e) =>
+                        onLiveChange(match.id, { period: Number(e.target.value) })
+                      }
+                    >
                       <option value={1}>1. třetina</option>
                       <option value={2}>2. třetina</option>
                       <option value={3}>3. třetina</option>
                       <option value={4}>Prodloužení</option>
                     </select>
                   </Field>
+
                   <Field label="Sponzor utkání">
-                    <select className="input" value={match.sponsorId} onChange={(e) => onMatchChange(match.id, { sponsorId: e.target.value })}>
+                    <select
+                      className="input"
+                      value={match.sponsorId}
+                      onChange={(e) =>
+                        onMatchChange(match.id, { sponsorId: e.target.value })
+                      }
+                    >
                       <option value="">Bez partnera utkání</option>
-                      {sponsors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {sponsors.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                 </div>
 
                 <Field label="Titulek přenosu" className="top-gap">
-                  <input className="input" value={match.live.overlayTitle} onChange={(e) => onLiveChange(match.id, { overlayTitle: e.target.value })} />
+                  <input
+                    className="input"
+                    value={match.live.overlayTitle}
+                    onChange={(e) =>
+                      onLiveChange(match.id, { overlayTitle: e.target.value })
+                    }
+                  />
                 </Field>
 
                 <div className="row top-gap">
-                  <button className="button secondary" onClick={() => onMatchChange(match.id, { status: "live" })}>Označit jako živě</button>
-                  <button className="button warning" onClick={() => onCloseMatch(match.id)}>Uzavřít zápas</button>
+                  <button
+                    className="button secondary"
+                    onClick={() => onMatchChange(match.id, { status: "live" })}
+                  >
+                    Označit jako živě
+                  </button>
+
+                  <button
+                    className="button secondary"
+                    disabled={!latestScorer}
+                    onClick={() =>
+                      latestScorer && onRemoveScorerEntry(match.id, latestScorer.id)
+                    }
+                  >
+                    Smazat poslední gól
+                  </button>
+
+                  <button
+                    className="button warning"
+                    onClick={() => onCloseMatch(match.id)}
+                  >
+                    Uzavřít zápas
+                  </button>
                 </div>
               </div>
             ) : null}
@@ -1100,17 +1486,29 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
           <div className="stack">
             <div className="panel small-panel">
               <h3>Střelci zápasu</h3>
-              {scorerSummary.length === 0 ? (
+
+              {scorerEntries.length === 0 ? (
                 <div className="empty top-gap">Zatím není zapsaný žádný střelec.</div>
               ) : (
                 <div className="stack top-gap">
-                  {scorerSummary.map((row) => (
-                    <div className="mini-card row between" key={`${row.teamName}-${row.playerName}`}>
+                  {scorerEntries.map((row) => (
+                    <div className="mini-card row between" key={row.id}>
                       <div>
                         <div className="card-title">{row.playerName}</div>
                         <div className="tiny">{row.teamName}</div>
                       </div>
-                      <strong>{row.goals} g</strong>
+
+                      <div className="row">
+                        <strong>1 g</strong>
+                        {isAdmin ? (
+                          <button
+                            className="button secondary"
+                            onClick={() => onRemoveScorerEntry(match.id, row.id)}
+                          >
+                            Smazat
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1136,7 +1534,16 @@ function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, o
               <h3>Stav zápasu</h3>
               <div className="stack top-gap">
                 <InfoLine label="Čas" value={match.time || "—"} />
-                <InfoLine label="Status" value={match.status === "scheduled" ? "Plánováno" : match.status === "live" ? "Živě" : "Ukončeno"} />
+                <InfoLine
+                  label="Status"
+                  value={
+                    match.status === "scheduled"
+                      ? "Plánováno"
+                      : match.status === "live"
+                      ? "Živě"
+                      : "Ukončeno"
+                  }
+                />
                 <InfoLine label="Časomíra" value={formatClock(match.live.clock)} />
                 <InfoLine label="Perioda" value={String(match.live.period)} />
               </div>
@@ -1152,6 +1559,7 @@ function RosterScorerPicker({ title, players, selected, onSelect, onConfirm }) {
   return (
     <div className="picker">
       <div className="card-title">{title}</div>
+
       {players.length === 0 ? (
         <div className="empty top-gap">Nejdřív doplň soupisku týmu.</div>
       ) : (
@@ -1167,6 +1575,7 @@ function RosterScorerPicker({ title, players, selected, onSelect, onConfirm }) {
               </button>
             ))}
           </div>
+
           <button className="button top-gap" disabled={!selected} onClick={onConfirm}>
             Přidat gól vybraného střelce
           </button>
@@ -1178,9 +1587,12 @@ function RosterScorerPicker({ title, players, selected, onSelect, onConfirm }) {
 
 function MatchLine({ match, teamId, teams, future = false }) {
   const isHome = match.homeId === teamId;
-  const opponent = isHome ? getTeamName(teams, match.awayId) : getTeamName(teams, match.homeId);
+  const opponent = isHome
+    ? getTeamName(teams, match.awayId)
+    : getTeamName(teams, match.homeId);
   const myScore = isHome ? match.homeScore : match.awayScore;
   const oppScore = isHome ? match.awayScore : match.homeScore;
+
   return (
     <div className="mini-card row between">
       <div>
