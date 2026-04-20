@@ -914,7 +914,7 @@ function App() {
                       <th>P</th>
                       <th>Skóre</th>
                       <th>B</th>
-                      <th>N</th>
+                     
                     </tr>
                   </thead>
                   <tbody>
@@ -939,7 +939,7 @@ function App() {
                         <td>
                           <strong>{row.points}</strong>
                         </td>
-                        <td>{row.shootoutScore}</td>
+                       
                       </tr>
                     ))}
                   </tbody>
