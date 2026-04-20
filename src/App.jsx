@@ -530,7 +530,7 @@ function App() {
                         Vstup
                       </button>
                     </div>
-                    <div className="tiny">Heslo: 97531</div>
+                   
                     {authError ? <div className="error">{authError}</div> : null}
                   </>
                 )}
