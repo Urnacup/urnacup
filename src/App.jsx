@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const STORAGE_KEY = "urnacup-www-v3";
 const ADMIN_PASSWORD = "97531";
 const MATCH_DURATION_SECONDS = 12 * 60;
 const POINTS_WIN = 2;
 const POINTS_DRAW = 1;
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const APP_STATE_ID = "main";
 
 const defaultTeamNames = [
   "Last Place Hunters",
@@ -143,47 +146,42 @@ function buildInitialState() {
   };
 }
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return buildInitialState();
-    const parsed = JSON.parse(raw);
-    const fallback = buildInitialState();
+function normalizeState(raw) {
+  const fallback = buildInitialState();
 
-    const teams = Array.isArray(parsed.teams) ? parsed.teams : fallback.teams;
-
-    const matches =
-      Array.isArray(parsed.matches) && parsed.matches.length
-        ? parsed.matches.map((m) => ({
-            ...m,
-            scorers: Array.isArray(m.scorers) ? m.scorers : [],
-            live: {
-              running: Boolean(m.live?.running),
-              clock:
-                typeof m.live?.clock === "number"
-                  ? m.live.clock
-                  : MATCH_DURATION_SECONDS,
-              period:
-                typeof m.live?.period === "number" ? m.live.period : 1,
-              overlayTitle: m.live?.overlayTitle || "",
-              events: Array.isArray(m.live?.events) ? m.live.events : [],
-            },
-          }))
-        : buildMatchesFromTemplates(teams);
-
-    return {
-      tournamentName: parsed.tournamentName || fallback.tournamentName,
-      urnaLogoUrl: parsed.urnaLogoUrl || "",
-      manualStandingsEnabled: Boolean(parsed.manualStandingsEnabled),
-      teams,
-      matches,
-      sponsors: Array.isArray(parsed.sponsors)
-        ? parsed.sponsors
-        : fallback.sponsors,
-    };
-  } catch {
-    return buildInitialState();
+  if (!raw || typeof raw !== "object") {
+    return fallback;
   }
+
+  const teams = Array.isArray(raw.teams) ? raw.teams : fallback.teams;
+
+  const matches =
+    Array.isArray(raw.matches) && raw.matches.length
+      ? raw.matches.map((m) => ({
+          ...m,
+          sponsorId: m.sponsorId || "",
+          scorers: Array.isArray(m.scorers) ? m.scorers : [],
+          live: {
+            running: Boolean(m.live?.running),
+            clock:
+              typeof m.live?.clock === "number"
+                ? m.live.clock
+                : MATCH_DURATION_SECONDS,
+            period: typeof m.live?.period === "number" ? m.live.period : 1,
+            overlayTitle: m.live?.overlayTitle || "",
+            events: Array.isArray(m.live?.events) ? m.live.events : [],
+          },
+        }))
+      : buildMatchesFromTemplates(teams);
+
+  return {
+    tournamentName: raw.tournamentName || fallback.tournamentName,
+    urnaLogoUrl: raw.urnaLogoUrl || "",
+    manualStandingsEnabled: Boolean(raw.manualStandingsEnabled),
+    teams,
+    matches,
+    sponsors: Array.isArray(raw.sponsors) ? raw.sponsors : fallback.sponsors,
+  };
 }
 
 function isFinished(match) {
@@ -362,8 +360,56 @@ function buildScorerTable(matches, teams) {
     .map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
+async function fetchRemoteState() {
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/app_state?id=eq.${APP_STATE_ID}&select=data`,
+    {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Nepodařilo se načíst data ze Supabase.");
+  }
+
+  const rows = await response.json();
+  const row = Array.isArray(rows) && rows.length ? rows[0] : null;
+
+  if (!row?.data) {
+    return buildInitialState();
+  }
+
+  return normalizeState(row.data);
+}
+
+async function saveRemoteState(nextData) {
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/app_state?id=eq.${APP_STATE_ID}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        data: nextData,
+        updated_at: new Date().toISOString(),
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Nepodařilo se uložit data do Supabase.");
+  }
+}
+
 function App() {
-  const [data, setData] = useState(loadState);
+  const [data, setData] = useState(buildInitialState);
   const [isAdmin, setIsAdmin] = useState(false);
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -373,10 +419,44 @@ function App() {
   const [newSponsorName, setNewSponsorName] = useState("");
   const [newSponsorLogo, setNewSponsorLogo] = useState("");
   const [sponsorIndex, setSponsorIndex] = useState(0);
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [syncInfo, setSyncInfo] = useState("Načítám sdílená data...");
+  const lastSavedJsonRef = useRef("");
+  const saveTimeoutRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setSyncError("Chybí nastavení Supabase ve Vercelu.");
+      setSyncInfo("");
+      return;
+    }
+
+    let active = true;
+
+    async function loadInitial() {
+      try {
+        const remoteData = await fetchRemoteState();
+        if (!active) return;
+        const normalized = normalizeState(remoteData);
+        setData(normalized);
+        lastSavedJsonRef.current = JSON.stringify(normalized);
+        setSyncError("");
+        setSyncInfo("Sdílená data jsou aktivní.");
+        setIsHydrated(true);
+      } catch (error) {
+        if (!active) return;
+        setSyncError(error.message || "Nepodařilo se načíst sdílená data.");
+        setSyncInfo("");
+      }
+    }
+
+    loadInitial();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -403,6 +483,58 @@ function App() {
     }, 3000);
     return () => clearInterval(timer);
   }, [data.sponsors.length]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+
+    const currentJson = JSON.stringify(data);
+    if (currentJson === lastSavedJsonRef.current) return;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await saveRemoteState(data);
+        lastSavedJsonRef.current = JSON.stringify(data);
+        setSyncError("");
+        setSyncInfo("Uloženo do sdílené databáze.");
+      } catch (error) {
+        setSyncError(error.message || "Nepodařilo se uložit data.");
+      }
+    }, 700);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [data, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const remoteData = await fetchRemoteState();
+        const normalized = normalizeState(remoteData);
+        const remoteJson = JSON.stringify(normalized);
+        const currentJson = JSON.stringify(data);
+
+        if (remoteJson !== currentJson && currentJson === lastSavedJsonRef.current) {
+          setData(normalized);
+          lastSavedJsonRef.current = remoteJson;
+          setSyncInfo("Načtena sdílená aktualizace.");
+        }
+      } catch {
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isHydrated, data]);
 
   const standings = useMemo(
     () => buildStandings(data.teams, data.matches, data.manualStandingsEnabled),
@@ -605,7 +737,8 @@ function App() {
   }
 
   function resetData() {
-    setData(buildInitialState());
+    const fresh = buildInitialState();
+    setData(fresh);
     setSelectedMatchId("");
     setSelectedTeamId("");
   }
@@ -683,6 +816,14 @@ function App() {
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="top-gap">
+            {syncError ? (
+              <div className="empty">{syncError}</div>
+            ) : (
+              <div className="tiny">{syncInfo}</div>
+            )}
           </div>
 
           {currentSponsor ? (
