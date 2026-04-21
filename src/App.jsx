@@ -705,7 +705,25 @@ export default function UrnacupPrototype() {
       ),
     }));
   };
-
+const clearMatch = (matchId) => {
+  setData((current) => ({
+    ...current,
+    matches: current.matches.map((match) =>
+      match.id === matchId
+        ? {
+            ...match,
+            homeScore: "",
+            awayScore: "",
+            status: "scheduled",
+            closedAt: null,
+            scorers: [],
+            sponsorId: null,
+            live: createLiveState(),
+          }
+        : match
+    ),
+  }));
+};
   const closeMatch = (matchId) => {
     setData((current) => ({
       ...current,
@@ -1160,21 +1178,21 @@ export default function UrnacupPrototype() {
         </div>
       </div>
 
-      {selectedMatch ? (
-        <MatchModal
-          match={selectedMatch}
-          teams={data.teams}
-          sponsors={data.sponsors}
-          isAdmin={isAdmin}
-          onClose={() => setSelectedMatchId(null)}
-          onMatchChange={updateMatch}
-          onLiveChange={updateMatchLive}
-          onAddGoal={addGoal}
-          onRemoveScorerEntry={removeScorerEntry}
-          onClearMatch={clearMatch}
-          onCloseMatch={closeMatch}
-        />
-      ) : null}
+   {selectedMatch ? (
+  <MatchModal
+    match={selectedMatch}
+    teams={data.teams}
+    sponsors={data.sponsors}
+    isAdmin={isAdmin}
+    onClose={() => setSelectedMatchId(null)}
+    onMatchChange={updateMatch}
+    onLiveChange={updateMatchLive}
+    onAddGoal={addGoal}
+    onRemoveScorerEntry={removeScorerEntry}
+    onClearMatch={clearMatch}
+    onCloseMatch={closeMatch}
+  />
+) : null}
 
       {selectedTeam ? (
         <TeamModal
@@ -1233,18 +1251,7 @@ function AuthCard({ isAdmin, passwordInput, setPasswordInput, authError, onLogin
   );
 }
 
-function MatchModal({
-  match,
-  teams,
-  sponsors,
-  isAdmin,
-  onClose,
-  onMatchChange,
-  onLiveChange,
-  onAddGoal,
-  onRemoveScorerEntry,
-  onClearMatch,
-  onCloseMatch,
+function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, onLiveChange, onAddGoal, onRemoveScorerEntry, onClearMatch, onCloseMatch }) {
 }) {
   const [selectedHomePlayer, setSelectedHomePlayer] = useState("");
   const [selectedAwayPlayer, setSelectedAwayPlayer] = useState("");
@@ -1451,26 +1458,26 @@ function MatchModal({
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <button onClick={() => onMatchChange(match.id, { status: "live" })} className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20">
-                    Označit jako živě
-                  </button>
-                  <button
-                    onClick={() => latestScorerEntry && onRemoveScorerEntry(match.id, latestScorerEntry.id)}
-                    disabled={!latestScorerEntry}
-                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Smazat poslední gól
-                  </button>
-                  <button
-                    onClick={() => onClearMatch(match.id)}
-                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                  >
-                    Vymazat zápas
-                  </button>
-                  <button onClick={() => onCloseMatch(match.id)} className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-400">
-                    Uzavřít zápas a promítnout do tabulky
-                  </button>
-                </div>
+  <button onClick={() => onMatchChange(match.id, { status: "live" })} className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20">
+    Označit jako živě
+  </button>
+  <button
+    onClick={() => latestScorerEntry && onRemoveScorerEntry(match.id, latestScorerEntry.id)}
+    disabled={!latestScorerEntry}
+    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+  >
+    Smazat poslední gól
+  </button>
+  <button
+    onClick={() => onClearMatch(match.id)}
+    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+  >
+    Vymazat zápas
+  </button>
+  <button onClick={() => onCloseMatch(match.id)} className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-400">
+    Uzavřít zápas a promítnout do tabulky
+  </button>
+</div>
               </div>
             ) : null}
           </div>
