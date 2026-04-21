@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const STORAGE_KEY = "urnacup-www-v2";
+const STORAGE_KEY = "urnacup-www-v3";
 const ADMIN_PASSWORD = "97531";
 const MATCH_DURATION_SECONDS = 12 * 60;
 const POINTS_WIN = 2;
@@ -151,6 +151,7 @@ function loadState() {
     const fallback = buildInitialState();
 
     const teams = Array.isArray(parsed.teams) ? parsed.teams : fallback.teams;
+
     const matches =
       Array.isArray(parsed.matches) && parsed.matches.length
         ? parsed.matches.map((m) => ({
@@ -399,7 +400,7 @@ function App() {
     if (!data.sponsors.length) return;
     const timer = setInterval(() => {
       setSponsorIndex((x) => (x + 1) % data.sponsors.length);
-    }, 2500);
+    }, 3000);
     return () => clearInterval(timer);
   }, [data.sponsors.length]);
 
@@ -631,22 +632,15 @@ function App() {
                 )}
               </div>
 
-              <div>
-                <div className="eyebrow">WWW prototyp turnaje</div>
-                <input
-                  className="title-input"
-                  value={data.tournamentName}
-                  onChange={(e) =>
-                    isAdmin &&
-                    setData((c) => ({ ...c, tournamentName: e.target.value }))
-                  }
-                  readOnly={!isAdmin}
-                />
-                <div className="muted">
-                  Body: 2 za výhru, 1 za remízu. U zápasu lze označit střelce
-                  podle soupisky, mazat chybného střelce a vede se tabulka střelců.
-                </div>
-              </div>
+              <input
+                className="title-input"
+                value={data.tournamentName}
+                onChange={(e) =>
+                  isAdmin &&
+                  setData((c) => ({ ...c, tournamentName: e.target.value }))
+                }
+                readOnly={!isAdmin}
+              />
             </div>
 
             <div className="stats">
@@ -660,10 +654,9 @@ function App() {
               <div className="card">
                 {isAdmin ? (
                   <>
-                    <div className="small-label success">Administrátor</div>
-                    <div className="card-title">Editace je odemčená</div>
+                    <div className="card-title">Administrátor</div>
                     <button
-                      className="button secondary"
+                      className="button secondary top-gap"
                       onClick={() => setIsAdmin(false)}
                     >
                       Odhlásit
@@ -671,8 +664,8 @@ function App() {
                   </>
                 ) : (
                   <>
-                    <div className="small-label">Přihlášení správce</div>
-                    <div className="row">
+                    <div className="card-title">Přihlášení</div>
+                    <div className="row top-gap">
                       <input
                         className="input"
                         type="password"
@@ -694,40 +687,31 @@ function App() {
 
           {currentSponsor ? (
             <div className="rotating">
-              <SponsorLogo sponsor={currentSponsor} />
-              <div>
-                <div className="small-label">Rotující partner v hlavičce</div>
-                <div className="card-title">{currentSponsor.name}</div>
-              </div>
+              <SponsorLogo sponsor={currentSponsor} large />
             </div>
           ) : null}
         </header>
 
         {isAdmin ? (
           <section className="panel">
-            <h2>Nastavení hlavičky</h2>
-            <div className="grid-two">
-              <div className="field-wrap">
-                <label>URL loga Urna Cupu</label>
-                <input
-                  className="input"
-                  value={data.urnaLogoUrl}
-                  onChange={(e) =>
-                    setData((c) => ({ ...c, urnaLogoUrl: e.target.value }))
-                  }
-                  placeholder="https://..."
-                />
-              </div>
-              <div className="note">
-                V této verzi se obrázky vkládají přes přímou URL adresu.
-              </div>
+            <h2>Hlavička</h2>
+            <div className="field-wrap top-gap">
+              <label>Logo Urna Cupu</label>
+              <input
+                className="input"
+                value={data.urnaLogoUrl}
+                onChange={(e) =>
+                  setData((c) => ({ ...c, urnaLogoUrl: e.target.value }))
+                }
+                placeholder="https://..."
+              />
             </div>
           </section>
         ) : null}
 
         <div className="layout">
           <section className="panel">
-            <h2>Účastníci turnaje</h2>
+            <h2>Účastníci</h2>
 
             {isAdmin ? (
               <div className="row top-gap">
@@ -735,7 +719,7 @@ function App() {
                   className="input"
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="Přidat nový tým"
+                  placeholder="Přidat tým"
                 />
                 <button className="button" onClick={addTeam}>
                   Přidat
@@ -769,12 +753,11 @@ function App() {
                         className="link-button tiny-link"
                         onClick={() => setSelectedTeamId(team.id)}
                       >
-                        Zobrazit profil týmu
+                        Detail
                       </button>
 
                       {isAdmin ? (
                         <div className="row mini-row">
-                          <span className="tiny">Nájezdy</span>
                           <input
                             className="mini-input"
                             type="number"
@@ -805,10 +788,10 @@ function App() {
             {isAdmin ? (
               <div className="grid-two top-gap">
                 <button className="button secondary" onClick={restoreFixedSchedule}>
-                  Obnovit pevný rozpis
+                  Obnovit rozpis
                 </button>
                 <button className="button secondary" onClick={resetData}>
-                  Obnovit demo data
+                  Reset
                 </button>
               </div>
             ) : null}
@@ -838,7 +821,7 @@ function App() {
                           : "Ukončeno"}
                       </span>
                       {sponsorName ? (
-                        <span className="sponsor-chip">Partner: {sponsorName}</span>
+                        <span className="sponsor-chip">{sponsorName}</span>
                       ) : null}
                     </div>
 
@@ -858,10 +841,6 @@ function App() {
             <section className="panel">
               <h2>Aktuální tabulka</h2>
 
-              <div className="note top-gap">
-                Bodování: 2 za výhru, 1 za remízu.
-              </div>
-
               {isAdmin ? (
                 <div className="manual-box top-gap">
                   <label className="checkbox-line">
@@ -875,10 +854,10 @@ function App() {
                         }))
                       }
                     />
-                    Zapnout ruční pořadí tabulky
+                    Ruční pořadí
                   </label>
 
-                  <div className="stack">
+                  <div className="stack top-gap">
                     {data.teams
                       .slice()
                       .sort((a, b) => a.name.localeCompare(b.name, "cs"))
@@ -914,7 +893,6 @@ function App() {
                       <th>P</th>
                       <th>Skóre</th>
                       <th>B</th>
-                     
                     </tr>
                   </thead>
                   <tbody>
@@ -939,7 +917,6 @@ function App() {
                         <td>
                           <strong>{row.points}</strong>
                         </td>
-                       
                       </tr>
                     ))}
                   </tbody>
@@ -948,10 +925,10 @@ function App() {
             </section>
 
             <section className="panel">
-              <h2>Tabulka střelců</h2>
+              <h2>Střelci</h2>
 
               {scorers.length === 0 ? (
-                <div className="empty top-gap">Zatím není zapsaný žádný střelec.</div>
+                <div className="empty top-gap">Zatím bez střelců.</div>
               ) : (
                 <div className="table-wrap top-gap">
                   <table>
@@ -995,10 +972,10 @@ function App() {
                     className="input"
                     value={newSponsorLogo}
                     onChange={(e) => setNewSponsorLogo(e.target.value)}
-                    placeholder="Odkaz na logo (URL)"
+                    placeholder="URL loga"
                   />
                   <button className="button" onClick={addSponsor}>
-                    Přidat sponzora
+                    Přidat
                   </button>
                 </div>
               ) : null}
@@ -1028,7 +1005,7 @@ function App() {
                                 logoUrl: e.target.value,
                               })
                             }
-                            placeholder="Odkaz na logo (URL)"
+                            placeholder="URL loga"
                           />
                         </>
                       ) : (
@@ -1104,17 +1081,20 @@ function removeSponsorDirect(setData, sponsorId) {
 function Stat({ label, value }) {
   return (
     <div className="card">
-      <div className="small-label">{label}</div>
+      <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
     </div>
   );
 }
 
-function SponsorLogo({ sponsor }) {
+function SponsorLogo({ sponsor, large = false }) {
+  const className = large ? "sponsor-logo sponsor-logo-large" : "sponsor-logo";
+
   if (sponsor.logoUrl) {
-    return <img className="sponsor-logo" src={sponsor.logoUrl} alt={sponsor.name} />;
+    return <img className={className} src={sponsor.logoUrl} alt={sponsor.name} />;
   }
-  return <div className="sponsor-logo fallback">{sponsorInitials(sponsor.name)}</div>;
+
+  return <div className={`${className} fallback`}>{sponsorInitials(sponsor.name)}</div>;
 }
 
 function TeamModal({
@@ -1139,16 +1119,13 @@ function TeamModal({
     <div className="modal-overlay">
       <div className="modal large">
         <div className="modal-header">
-          <div>
-            <div className="small-label">Profil týmu</div>
-            <div className="card-title big">{team.name}</div>
-          </div>
+          <div className="card-title big">{team.name}</div>
           <button className="button secondary" onClick={onClose}>
             Zavřít
           </button>
         </div>
 
-        <div className="modal-grid">
+        <div className="modal-grid team-modal-grid">
           <div className="stack">
             <div className="panel small-panel">
               <div className="grid-two">
@@ -1169,7 +1146,7 @@ function TeamModal({
                   placeholder="Každý hráč na samostatný řádek"
                 />
               ) : roster.length === 0 ? (
-                <div className="empty top-gap">Soupiska zatím nebyla doplněna.</div>
+                <div className="empty top-gap">Soupiska zatím není vyplněná.</div>
               ) : (
                 <div className="stack top-gap">
                   {roster.map((player, i) => (
@@ -1187,7 +1164,7 @@ function TeamModal({
               <h3>Odehraná utkání</h3>
               <div className="stack top-gap">
                 {played.length === 0 ? (
-                  <div className="empty">Tým ještě nemá odehrané utkání.</div>
+                  <div className="empty">Bez odehraného zápasu.</div>
                 ) : (
                   played.map((m) => (
                     <MatchLine key={m.id} match={m} teamId={team.id} teams={teams} />
@@ -1200,7 +1177,7 @@ function TeamModal({
               <h3>Příští program</h3>
               <div className="stack top-gap">
                 {upcoming.length === 0 ? (
-                  <div className="empty">Další utkání zatím nejsou.</div>
+                  <div className="empty">Bez dalšího programu.</div>
                 ) : (
                   upcoming.map((m) => (
                     <MatchLine
@@ -1255,16 +1232,16 @@ function MatchModal({
       teamName: getTeamName(teams, entry.teamId),
     }));
 
-  const latestScorer = match.scorers && match.scorers.length
-    ? match.scorers[match.scorers.length - 1]
-    : null;
+  const latestScorer =
+    match.scorers && match.scorers.length
+      ? match.scorers[match.scorers.length - 1]
+      : null;
 
   return (
     <div className="modal-overlay">
       <div className="modal xlarge">
         <div className="modal-header">
           <div>
-            <div className="small-label">Detail utkání</div>
             <div className="card-title big">
               {homeTeam?.name} vs. {awayTeam?.name}
             </div>
@@ -1278,10 +1255,6 @@ function MatchModal({
         {sponsor ? (
           <div className="sponsor-banner">
             <SponsorLogo sponsor={sponsor} />
-            <div>
-              <div className="small-label">Partner utkání</div>
-              <div className="card-title">{sponsor.name}</div>
-            </div>
           </div>
         ) : null}
 
@@ -1316,21 +1289,21 @@ function MatchModal({
 
             {isAdmin ? (
               <div className="panel small-panel">
-                <h3>Administrace utkání a střelců</h3>
+                <h3>Správa zápasu</h3>
 
                 <div className="button-grid top-gap">
                   <button
                     className="button"
                     onClick={() => onAddGoal(match.id, "home", "Neurčený střelec")}
                   >
-                    + domácí bez střelce
+                    + domácí
                   </button>
 
                   <button
                     className="button"
                     onClick={() => onAddGoal(match.id, "away", "Neurčený střelec")}
                   >
-                    + hosté bez střelce
+                    + hosté
                   </button>
 
                   <button
@@ -1346,7 +1319,7 @@ function MatchModal({
                       }
                     }}
                   >
-                    {match.live.running ? "Pozastavit čas" : "Spustit čas"}
+                    {match.live.running ? "Stop" : "Start"}
                   </button>
 
                   <button
@@ -1364,7 +1337,7 @@ function MatchModal({
 
                 <div className="grid-two top-gap">
                   <RosterScorerPicker
-                    title={`Střelci ${homeTeam?.name || ""}`}
+                    title={homeTeam?.name || ""}
                     players={homeRoster}
                     selected={homePlayer}
                     onSelect={setHomePlayer}
@@ -1376,7 +1349,7 @@ function MatchModal({
                   />
 
                   <RosterScorerPicker
-                    title={`Střelci ${awayTeam?.name || ""}`}
+                    title={awayTeam?.name || ""}
                     players={awayRoster}
                     selected={awayPlayer}
                     onSelect={setAwayPlayer}
@@ -1389,7 +1362,7 @@ function MatchModal({
                 </div>
 
                 <div className="grid-two top-gap">
-                  <Field label="Manuální skóre domácí">
+                  <Field label="Domácí">
                     <input
                       className="input"
                       type="number"
@@ -1400,7 +1373,7 @@ function MatchModal({
                     />
                   </Field>
 
-                  <Field label="Manuální skóre hosté">
+                  <Field label="Hosté">
                     <input
                       className="input"
                       type="number"
@@ -1426,7 +1399,7 @@ function MatchModal({
                     </select>
                   </Field>
 
-                  <Field label="Sponzor utkání">
+                  <Field label="Sponzor">
                     <select
                       className="input"
                       value={match.sponsorId}
@@ -1434,7 +1407,7 @@ function MatchModal({
                         onMatchChange(match.id, { sponsorId: e.target.value })
                       }
                     >
-                      <option value="">Bez partnera utkání</option>
+                      <option value="">Bez sponzora</option>
                       {sponsors.map((s) => (
                         <option key={s.id} value={s.id}>
                           {s.name}
@@ -1444,7 +1417,7 @@ function MatchModal({
                   </Field>
                 </div>
 
-                <Field label="Titulek přenosu" className="top-gap">
+                <Field label="Titulek" className="top-gap">
                   <input
                     className="input"
                     value={match.live.overlayTitle}
@@ -1454,12 +1427,12 @@ function MatchModal({
                   />
                 </Field>
 
-                <div className="row top-gap">
+                <div className="row top-gap wrap">
                   <button
                     className="button secondary"
                     onClick={() => onMatchChange(match.id, { status: "live" })}
                   >
-                    Označit jako živě
+                    Označit živě
                   </button>
 
                   <button
@@ -1488,7 +1461,7 @@ function MatchModal({
               <h3>Střelci zápasu</h3>
 
               {scorerEntries.length === 0 ? (
-                <div className="empty top-gap">Zatím není zapsaný žádný střelec.</div>
+                <div className="empty top-gap">Zatím bez střelce.</div>
               ) : (
                 <div className="stack top-gap">
                   {scorerEntries.map((row) => (
@@ -1516,10 +1489,10 @@ function MatchModal({
             </div>
 
             <div className="panel small-panel">
-              <h3>Události zápasu</h3>
+              <h3>Události</h3>
               <div className="stack top-gap">
                 {(match.live.events || []).length === 0 ? (
-                  <div className="empty">Zatím bez událostí.</div>
+                  <div className="empty">Bez událostí.</div>
                 ) : (
                   match.live.events.map((event) => (
                     <div className="mini-card" key={event.id}>
@@ -1531,7 +1504,7 @@ function MatchModal({
             </div>
 
             <div className="panel small-panel">
-              <h3>Stav zápasu</h3>
+              <h3>Stav</h3>
               <div className="stack top-gap">
                 <InfoLine label="Čas" value={match.time || "—"} />
                 <InfoLine
@@ -1561,7 +1534,7 @@ function RosterScorerPicker({ title, players, selected, onSelect, onConfirm }) {
       <div className="card-title">{title}</div>
 
       {players.length === 0 ? (
-        <div className="empty top-gap">Nejdřív doplň soupisku týmu.</div>
+        <div className="empty top-gap">Nejdřív doplň soupisku.</div>
       ) : (
         <>
           <div className="picker-list top-gap">
@@ -1577,7 +1550,7 @@ function RosterScorerPicker({ title, players, selected, onSelect, onConfirm }) {
           </div>
 
           <button className="button top-gap" disabled={!selected} onClick={onConfirm}>
-            Přidat gól vybraného střelce
+            Přidat gól
           </button>
         </>
       )}
