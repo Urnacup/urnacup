@@ -1,28 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Trophy,
-  Users,
-  CalendarDays,
-  Radio,
-  Plus,
-  Trash2,
-  RefreshCcw,
-  Play,
-  Pause,
-  RotateCcw,
-  Smartphone,
-  Handshake,
-  ChevronRight,
-  CheckCircle2,
-  ShieldCheck,
-  Lock,
-  LogOut,
-  Image as ImageIcon,
-  ListChecks,
-  Clock3,
-  Target,
-  PencilLine,
-} from "lucide-react";
+const Trophy = (props) => <span {...props}>🏆</span>;
+const Users = (props) => <span {...props}>👥</span>;
+const CalendarDays = (props) => <span {...props}>📅</span>;
+const Radio = (props) => <span {...props}>🔴</span>;
+const Plus = (props) => <span {...props}>＋</span>;
+const Trash2 = (props) => <span {...props}>🗑️</span>;
+const RefreshCcw = (props) => <span {...props}>↻</span>;
+const Play = (props) => <span {...props}>▶</span>;
+const Pause = (props) => <span {...props}>⏸</span>;
+const RotateCcw = (props) => <span {...props}>↺</span>;
+const Smartphone = (props) => <span {...props}>📱</span>;
+const Handshake = (props) => <span {...props}>🤝</span>;
+const ChevronRight = (props) => <span {...props}>›</span>;
+const CheckCircle2 = (props) => <span {...props}>✅</span>;
+const ShieldCheck = (props) => <span {...props}>🛡️</span>;
+const Lock = (props) => <span {...props}>🔒</span>;
+const LogOut = (props) => <span {...props}>↩</span>;
+const ImageIcon = (props) => <span {...props}>🖼️</span>;
+const ListChecks = (props) => <span {...props}>☑️</span>;
+const Clock3 = (props) => <span {...props}>🕒</span>;
+const Target = (props) => <span {...props}>🎯</span>;
+const PencilLine = (props) => <span {...props}>✏️</span>;
 
 const STORAGE_KEY = "urnacup-state-v14";
 const MATCH_DURATION_SECONDS = 15 * 60;
