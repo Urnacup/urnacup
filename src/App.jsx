@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./styles.css";
 const Trophy = (props) => <span {...props}>🏆</span>;
 const Users = (props) => <span {...props}>👥</span>;
 const CalendarDays = (props) => <span {...props}>📅</span>;
