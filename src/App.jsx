@@ -686,25 +686,7 @@ export default function UrnacupPrototype() {
     }));
   };
 
-  const clearMatch = (matchId) => {
-    setData((current) => ({
-      ...current,
-      matches: current.matches.map((match) =>
-        match.id === matchId
-          ? {
-              ...match,
-              homeScore: "",
-              awayScore: "",
-              status: "scheduled",
-              closedAt: null,
-              scorers: [],
-              sponsorId: null,
-              live: createLiveState(),
-            }
-          : match
-      ),
-    }));
-  };
+ 
 const clearMatch = (matchId) => {
   setData((current) => ({
     ...current,
@@ -1252,7 +1234,7 @@ function AuthCard({ isAdmin, passwordInput, setPasswordInput, authError, onLogin
 }
 
 function MatchModal({ match, teams, sponsors, isAdmin, onClose, onMatchChange, onLiveChange, onAddGoal, onRemoveScorerEntry, onClearMatch, onCloseMatch }) {
-}) {
+
   const [selectedHomePlayer, setSelectedHomePlayer] = useState("");
   const [selectedAwayPlayer, setSelectedAwayPlayer] = useState("");
 
